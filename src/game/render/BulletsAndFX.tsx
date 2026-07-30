@@ -1,4 +1,4 @@
-import { WORLD_HALF, WORLD_SIZE } from "../constants";
+import { WORLD_HALF } from "../constants";
 import type { BulletState, Particle } from "../types";
 
 export function Bullets({ bullets }: { bullets: BulletState[] }) {
@@ -53,19 +53,5 @@ export function PlayfieldRing() {
         side={2}
       />
     </mesh>
-  );
-}
-
-/**
- * Floor grid spans the full wrap-around field (~2.5× original).
- * Cell size stays ~6 units so lines remain readable at play height.
- */
-export function GridFloor() {
-  const divisions = Math.round(WORLD_SIZE / 6);
-  return (
-    <gridHelper
-      args={[WORLD_SIZE, divisions, "#1a2236", "#0e1422"]}
-      position={[0, -0.6, 0]}
-    />
   );
 }

@@ -3,6 +3,7 @@ import {
   AUDIO,
   CLAUDE,
   FIXED_DT,
+  RELATIVITY,
   SHIP,
   WORLD_HALF,
   asteroidsForLevel,
@@ -31,8 +32,11 @@ import {
   clampSpeed,
   forwardFromYaw,
   gravityAccelFrom,
+  lorentzBeta,
+  lorentzGamma,
   randRange,
   randomEdgePoint,
+  relativisticMass,
   ricochetFromImpulse,
   wrap,
   wrapDelta,
@@ -778,10 +782,11 @@ export class Simulation {
 
     const bodies: Body[] = [];
     if (this.ship.alive) {
+      const sp = Math.hypot(this.ship.vx, this.ship.vz);
       bodies.push({
         x: this.ship.x,
         z: this.ship.z,
-        mass: this.ship.mass,
+        mass: relativisticMass(this.ship.mass, sp),
         ax: 0,
         az: 0,
         kind: "ship",
@@ -789,10 +794,11 @@ export class Simulation {
       });
     }
     for (const a of this.asteroids) {
+      const sp = Math.hypot(a.vx, a.vz);
       bodies.push({
         x: a.x,
         z: a.z,
-        mass: a.mass,
+        mass: relativisticMass(a.mass, sp),
         ax: 0,
         az: 0,
         kind: "ast",
@@ -800,10 +806,11 @@ export class Simulation {
       });
     }
     for (const c of this.claudes) {
+      const sp = Math.hypot(c.vx, c.vz);
       bodies.push({
         x: c.x,
         z: c.z,
-        mass: c.mass,
+        mass: relativisticMass(c.mass, sp),
         ax: 0,
         az: 0,
         kind: "claude",
@@ -868,7 +875,10 @@ export class Simulation {
           bullet.z,
           this.ship.x,
           this.ship.z,
-          this.ship.mass,
+          relativisticMass(
+            this.ship.mass,
+            Math.hypot(this.ship.vx, this.ship.vz),
+          ),
           ASTEROID.G,
           ASTEROID.soft,
           gMul,
@@ -882,7 +892,7 @@ export class Simulation {
           bullet.z,
           a.x,
           a.z,
-          a.mass,
+          relativisticMass(a.mass, Math.hypot(a.vx, a.vz)),
           ASTEROID.G,
           ASTEROID.soft,
           gMul,
@@ -896,7 +906,7 @@ export class Simulation {
           bullet.z,
           c.x,
           c.z,
-          c.mass,
+          relativisticMass(c.mass, Math.hypot(c.vx, c.vz)),
           ASTEROID.G,
           ASTEROID.soft,
           gMul,
@@ -909,11 +919,16 @@ export class Simulation {
     }
 
     if (this.ship.alive) {
+      // Proper-time scale: pilot systems run slow as β → 1 (time dilation)
+      const shipSp = Math.hypot(this.ship.vx, this.ship.vz);
+      const gamma = lorentzGamma(shipSp);
+      const proper = Math.pow(gamma, -RELATIVITY.pilotTimeExp);
+
       let turn = actions.steer;
       if (effect === "thrust_warp" && intensity > 0.08) {
         turn *= 1 + Math.sin(this.time * 7) * intensity * fx.thrustWarpTurn;
       }
-      this.ship.yaw += turn * SHIP.turnRate * dt;
+      this.ship.yaw += turn * SHIP.turnRate * dt * proper;
 
       const fwd = forwardFromYaw(this.ship.yaw);
 
@@ -1004,7 +1019,8 @@ export class Simulation {
       this.ship.z = wrap(this.ship.z + this.ship.vz * dt);
 
       if (this.ship.invuln > 0) this.ship.invuln -= dt;
-      if (this.ship.fireCd > 0) this.ship.fireCd -= dt;
+      // Fire clock ticks in ship proper time → longer wall-time gap at high γ
+      if (this.ship.fireCd > 0) this.ship.fireCd -= dt * proper;
 
       if (
         actions.fire &&
@@ -1015,12 +1031,16 @@ export class Simulation {
         if (effect === "bullet_slow" && intensity > 0.08) {
           bSpeed *= Math.max(0.1, 1 - intensity * fx.bulletSlowFrac);
         }
+        // Soft-cap near c so nothing goes superluminal
+        const bvx = this.ship.vx + fwd.x * bSpeed;
+        const bvz = this.ship.vz + fwd.z * bSpeed;
+        const capped = clampSpeed(bvx, bvz, RELATIVITY.c * 0.98);
         this.bullets.push({
           id: this.id(),
           x: this.ship.x + fwd.x * 1.6,
           z: this.ship.z + fwd.z * 1.6,
-          vx: this.ship.vx + fwd.x * bSpeed,
-          vz: this.ship.vz + fwd.z * bSpeed,
+          vx: capped.vx,
+          vz: capped.vz,
           life: SHIP.bulletLife,
           radius: SHIP.bulletRadius,
         });
@@ -1486,5 +1506,23 @@ export class Simulation {
 
   getTime() {
     return this.time;
+  }
+
+  /** Ship-frame relativity snapshot for render (grid contraction, FOV, Doppler). */
+  getRelativity() {
+    const vx = this.ship.vx;
+    const vz = this.ship.vz;
+    const speed = Math.hypot(vx, vz);
+    const gamma = lorentzGamma(speed);
+    const beta = lorentzBeta(speed);
+    return {
+      speed,
+      gamma,
+      beta,
+      vx,
+      vz,
+      x: this.ship.x,
+      z: this.ship.z,
+    };
   }
 }

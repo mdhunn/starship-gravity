@@ -1,4 +1,4 @@
-import { WORLD_HALF } from "../constants";
+import { RELATIVITY, WORLD_HALF } from "../constants";
 
 export function clamp(v: number, a: number, b: number): number {
   return Math.max(a, Math.min(b, v));
@@ -87,6 +87,25 @@ export function clampSpeed(
   if (sp <= max || sp < 1e-8) return { vx, vz };
   const s = max / sp;
   return { vx: vx * s, vz: vz * s };
+}
+
+/** Lorentz factor γ = 1/√(1−β²), β = v/c, clamped below lightlike. */
+export function lorentzGamma(speed: number, c = RELATIVITY.c): number {
+  const beta = Math.min(0.995, Math.max(0, speed) / c);
+  return 1 / Math.sqrt(1 - beta * beta);
+}
+
+export function lorentzBeta(speed: number, c = RELATIVITY.c): number {
+  return Math.min(0.995, Math.max(0, speed) / c);
+}
+
+/**
+ * Relativistic mass factor for gravity sources.
+ * m_rel = m · (1 + massGain·(γ−1)) — full γ would be too harsh on clusters.
+ */
+export function relativisticMass(restMass: number, speed: number): number {
+  const g = lorentzGamma(speed);
+  return restMass * (1 + RELATIVITY.massGain * (g - 1));
 }
 
 /**

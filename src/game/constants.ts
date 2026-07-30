@@ -33,6 +33,28 @@ export const SHIP = {
   collisionRestitution: 0.72,
 } as const;
 
+/**
+ * Relativistic presentation + mild dynamics.
+ * c is set so cruise near maxSpeed is a large β — effects become obvious
+ * in the upper third of the speed band without making the ship unplayable.
+ */
+export const RELATIVITY = {
+  /** Effective light speed (world units / s). maxSpeed/c ≈ 0.875 → γ ≈ 2.1 */
+  c: 48,
+  /** β below this: effects ramped softly (still continuous). */
+  softBeta: 0.2,
+  /** FOV boost per (γ − 1) on the chase cam */
+  fovPerGamma: 14,
+  /** Max extra FOV degrees */
+  maxFovBoost: 22,
+  /** Grid length-contraction blend (1 = full 1/γ along velocity) */
+  gridContract: 0.92,
+  /** Source-mass boost: m_rel = m * (1 + massGain*(γ−1)) */
+  massGain: 0.85,
+  /** Proper-time scale on pilot inputs: turn/fire use dt/γ^k */
+  pilotTimeExp: 0.65,
+} as const;
+
 export const ASTEROID = {
   sizes: {
     large: { radius: 3.4, mass: 10, hp: 1, splits: 2, next: "medium" as const },
@@ -41,8 +63,14 @@ export const ASTEROID = {
   },
   spin: 1.8,
   lineageBonus: 1000,
-  G: 25,
-  soft: 2.8,
+  /**
+   * Gravity profile scaled so characteristic range is 2× the original:
+   * soft′ = 2·soft₀, G′ = 4·G₀ keeps near-field peak force while the
+   * 1/r² tail stays strong twice as far out.
+   * Original: G=25, soft=2.8
+   */
+  G: 100,
+  soft: 5.6,
   maxSpeed: 36,
   spawnInner: 22,
   spawnOuter: 55,

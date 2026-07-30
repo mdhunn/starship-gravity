@@ -90,6 +90,14 @@ export function ShipMesh({
     group.current.position.y =
       0.55 + Math.sin(state.clock.elapsedTime * 2.4) * 0.04;
 
+    // Length contraction along hull (local −Z) as speed → c
+    const speed = Math.hypot(ship.vx, ship.vz);
+    const beta = Math.min(0.995, speed / 48);
+    const gamma = 1 / Math.sqrt(1 - beta * beta);
+    const compress = 1 / gamma;
+    const fatten = 1 + (gamma - 1) * 0.12;
+    group.current.scale.set(1.15 * fatten, 1.15 * fatten, 1.15 * compress);
+
     if (plume.current) {
       plume.current.visible = thrusting && ship.alive;
       if (thrusting) {
