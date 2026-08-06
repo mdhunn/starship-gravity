@@ -3,7 +3,7 @@
  * Suit breathing, thruster rumble, cannon, and near-field explosions.
  */
 
-const MASTER_GAIN = 0.42;
+const MASTER_GAIN = 0.55;
 const STORAGE_KEY = "starship-gravity-audio";
 
 export type AudioChannelSettings = {
@@ -21,7 +21,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioChannelSettings = {
   cannonEnabled: true,
   cannonVolume: 0.9,
   breathEnabled: true,
-  breathVolume: 0.75,
+  breathVolume: 0.85,
 };
 
 function clamp01(v: number) {
@@ -39,7 +39,7 @@ function loadSettings(): AudioChannelSettings {
       cannonEnabled: parsed.cannonEnabled ?? true,
       cannonVolume: clamp01(parsed.cannonVolume ?? 0.9),
       breathEnabled: parsed.breathEnabled ?? true,
-      breathVolume: clamp01(parsed.breathVolume ?? 0.75),
+      breathVolume: clamp01(parsed.breathVolume ?? 0.85),
     };
   } catch {
     return { ...DEFAULT_AUDIO_SETTINGS };
@@ -70,11 +70,15 @@ export class SoundEngine {
   private thrusterLevel = 0;
   private thrusterTarget = 0;
 
-  // Suit breathing (looped schedule)
-  private breathGain: GainNode | null = null;
-  private breathNextAt = 0;
+  // Suit breathing — continuous pink noise shaped by a breath LFO
+  private breathBus: GainNode | null = null;
+  private breathEnv: GainNode | null = null;
+  private breathFilter: BiquadFilterNode | null = null;
+  private breathHp: BiquadFilterNode | null = null;
+  private breathNoise: AudioBufferSourceNode | null = null;
+  private breathPhase = 0;
   private breathActive = false;
-  private breathInterval = 3.2;
+  private breathInterval = 2.6;
   private breathStress = 0;
 
   // Channel buses
@@ -82,6 +86,7 @@ export class SoundEngine {
   private fxBus: GainNode | null = null;
 
   private noiseBuffer: AudioBuffer | null = null;
+  private pinkBuffer: AudioBuffer | null = null;
   private started = false;
 
   getSettings(): AudioChannelSettings {
@@ -119,19 +124,23 @@ export class SoundEngine {
     if (this.fxBus) {
       this.fxBus.gain.setTargetAtTime(1, t, 0.04);
     }
-    if (this.breathGain) {
+    if (this.breathBus) {
       const open =
         this.breathActive &&
         this.settings.breathEnabled &&
         this.settings.breathVolume > 0.001;
-      this.breathGain.gain.setTargetAtTime(open ? 1 : 0, t, 0.06);
+      this.breathBus.gain.setTargetAtTime(open ? 1 : 0, t, 0.05);
     }
   }
 
   unlock() {
     this.ensure();
     if (this.ctx?.state === "suspended") {
-      void this.ctx.resume();
+      void this.ctx.resume().then(() => {
+        if (this.unlocked) this.playBreathCue();
+      });
+    } else if (this.ctx?.state === "running") {
+      this.playBreathCue();
     }
     this.unlocked = true;
   }
@@ -160,14 +169,15 @@ export class SoundEngine {
     this.fxBus.gain.value = 1;
     this.fxBus.connect(this.master);
 
-    // Start open — mute is driven by breathActive / settings in update()
-    this.breathGain = this.ctx.createGain();
-    this.breathGain.gain.value = 1;
-    this.breathGain.connect(this.master);
+    this.breathBus = this.ctx.createGain();
+    this.breathBus.gain.value = 0;
+    this.breathBus.connect(this.master);
 
     this.noiseBuffer = this.makeNoiseBuffer(2);
+    this.pinkBuffer = this.makePinkBuffer(2);
 
     this.startThrusterGraph();
+    this.startBreathGraph();
     this.started = true;
   }
 
@@ -178,6 +188,34 @@ export class SoundEngine {
     const data = buf.getChannelData(0);
     for (let i = 0; i < len; i++) {
       data[i] = Math.random() * 2 - 1;
+    }
+    return buf;
+  }
+
+  /** Paul Kellet pink-noise approx — airy helmet breath body */
+  private makePinkBuffer(seconds: number): AudioBuffer | null {
+    if (!this.ctx) return null;
+    const len = Math.floor(this.ctx.sampleRate * seconds);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    let b3 = 0;
+    let b4 = 0;
+    let b5 = 0;
+    let b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.969 * b2 + white * 0.153852;
+      b3 = 0.8665 * b3 + white * 0.3104856;
+      b4 = 0.55 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.016898;
+      data[i] =
+        (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+      b6 = white * 0.115926;
     }
     return buf;
   }
@@ -212,6 +250,56 @@ export class SoundEngine {
     this.thrusterOsc.start();
   }
 
+  private startBreathGraph() {
+    if (!this.ctx || !this.breathBus || !this.pinkBuffer) return;
+
+    this.breathEnv = this.ctx.createGain();
+    this.breathEnv.gain.value = 0;
+    this.breathEnv.connect(this.breathBus);
+
+    this.breathFilter = this.ctx.createBiquadFilter();
+    this.breathFilter.type = "lowpass";
+    this.breathFilter.frequency.value = 1200;
+    this.breathFilter.Q.value = 0.55;
+    this.breathFilter.connect(this.breathEnv);
+
+    this.breathHp = this.ctx.createBiquadFilter();
+    this.breathHp.type = "highpass";
+    this.breathHp.frequency.value = 90;
+    this.breathHp.Q.value = 0.5;
+    this.breathHp.connect(this.breathFilter);
+
+    this.breathNoise = this.ctx.createBufferSource();
+    this.breathNoise.buffer = this.pinkBuffer;
+    this.breathNoise.loop = true;
+    this.breathNoise.connect(this.breathHp);
+    this.breathNoise.start();
+  }
+
+  /** Short inhale cue when audio unlocks — proves the helmet mic is live */
+  private playBreathCue() {
+    if (!this.ctx || !this.breathBus || !this.pinkBuffer) return;
+    if (!this.settings.breathEnabled || this.settings.breathVolume < 0.001)
+      return;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.pinkBuffer;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 1500;
+    const g = this.ctx.createGain();
+    const peak = 0.62 * this.settings.breathVolume;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001, peak), t + 0.14);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.65);
+    src.connect(lp);
+    lp.connect(g);
+    g.connect(this.breathBus);
+    this.breathBus.gain.setValueAtTime(1, t);
+    src.start(t);
+    src.stop(t + 0.7);
+  }
+
   update(
     dt: number,
     opts: {
@@ -227,7 +315,6 @@ export class SoundEngine {
     this.ensure();
     if (!this.ctx || !this.started) return;
     if (this.ctx.state === "suspended") {
-      // Keep trying to resume after user gesture / tab focus
       void this.ctx.resume();
       return;
     }
@@ -252,30 +339,55 @@ export class SoundEngine {
       1,
       safetyStress * 0.65 + opts.claudeIntensity * 0.45,
     );
-    const baseInterval = Math.max(1.05, 3.4 - (opts.level - 1) * 0.18);
+    const baseInterval = Math.max(1.1, 2.7 - (opts.level - 1) * 0.12);
     this.breathInterval = Math.max(
-      0.75,
-      baseInterval * (1 - this.breathStress * 0.42),
+      0.85,
+      baseInterval * (1 - this.breathStress * 0.45),
     );
 
-    if (this.breathGain) {
-      // Bus was previously stuck at 0 — breaths never made it to the speakers
-      this.breathGain.gain.setTargetAtTime(
-        this.breathActive ? 1 : 0,
-        this.ctx.currentTime,
-        0.08,
-      );
+    this.applyBreath(dt);
+  }
+
+  private applyBreath(dt: number) {
+    if (!this.ctx || !this.breathBus || !this.breathEnv || !this.breathFilter)
+      return;
+    const t = this.ctx.currentTime;
+
+    if (!this.breathActive) {
+      this.breathBus.gain.setTargetAtTime(0, t, 0.1);
+      this.breathEnv.gain.setTargetAtTime(0, t, 0.08);
+      return;
     }
 
-    if (this.breathActive) {
-      this.scheduleBreaths();
+    this.breathBus.gain.setTargetAtTime(1, t, 0.05);
+
+    this.breathPhase =
+      (this.breathPhase + dt / Math.max(0.4, this.breathInterval)) % 1;
+    const p = this.breathPhase;
+    const stress = this.breathStress;
+
+    let shape = 0;
+    if (p < 0.42) {
+      shape = Math.sin((p / 0.42) * Math.PI);
+    } else if (p < 0.5) {
+      shape = 0.12;
+    } else {
+      shape = Math.sin(((p - 0.5) / 0.5) * Math.PI) * 0.82;
     }
+
+    const peak =
+      (0.48 + stress * 0.3) * Math.max(0.25, this.settings.breathVolume);
+    const level = peak * shape;
+
+    this.breathEnv.gain.setTargetAtTime(Math.max(0.0001, level), t, 0.03);
+    const cutoff = 700 + shape * 1100 + stress * 350;
+    this.breathFilter.frequency.setTargetAtTime(cutoff, t, 0.04);
   }
 
   private applyThruster(level: number, reverse: boolean) {
     if (!this.ctx || !this.thrusterGain || !this.thrusterFilter) return;
     const t = this.ctx.currentTime;
-    const vol = level * (reverse ? 0.22 : 0.32);
+    const vol = level * (reverse ? 0.18 : 0.26);
     this.thrusterGain.gain.setTargetAtTime(vol, t, 0.04);
     this.thrusterFilter.frequency.setTargetAtTime(
       reverse ? 160 + level * 80 : 200 + level * 280,
@@ -288,89 +400,8 @@ export class SoundEngine {
         t,
         0.05,
       );
-      this.thrusterOscGain.gain.setTargetAtTime(level * 0.08, t, 0.05);
+      this.thrusterOscGain.gain.setTargetAtTime(level * 0.07, t, 0.05);
     }
-  }
-
-  private scheduleBreaths() {
-    if (!this.ctx || !this.breathGain || !this.noiseBuffer) return;
-    const now = this.ctx.currentTime;
-    if (this.breathNextAt < now) this.breathNextAt = now + 0.05;
-
-    // Schedule a short horizon so inhalations stay continuous without backlog
-    while (this.breathNextAt < now + 1.2) {
-      this.playOneBreath(this.breathNextAt);
-      this.breathNextAt += this.breathInterval;
-    }
-  }
-
-  private playOneBreath(when: number) {
-    if (!this.ctx || !this.breathGain || !this.noiseBuffer) return;
-
-    const stress = this.breathStress;
-    const inhaleDur = 0.45 + stress * 0.12;
-    const exhaleDur = 0.55 + stress * 0.15;
-    // Louder helmet mic so breathing is audible under thrusters
-    const peak = (0.14 + stress * 0.12) * this.settings.breathVolume;
-
-    this.noiseBurst({
-      when,
-      duration: inhaleDur,
-      filterFreq: 900 + stress * 400,
-      filterQ: 0.9,
-      peakGain: peak,
-      attack: 0.08,
-      release: 0.18,
-      dest: this.breathGain,
-    });
-    this.noiseBurst({
-      when: when + inhaleDur * 0.85,
-      duration: exhaleDur,
-      filterFreq: 420 + stress * 120,
-      filterQ: 0.6,
-      peakGain: peak * 0.7,
-      attack: 0.1,
-      release: 0.28,
-      dest: this.breathGain,
-    });
-  }
-
-  private noiseBurst(opts: {
-    when: number;
-    duration: number;
-    filterFreq: number;
-    filterQ: number;
-    peakGain: number;
-    attack: number;
-    release: number;
-    dest: AudioNode;
-  }) {
-    if (!this.ctx || !this.noiseBuffer) return;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer;
-    src.loop = true;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = opts.filterFreq;
-    filter.Q.value = opts.filterQ;
-
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.0001, opts.when);
-    g.gain.exponentialRampToValueAtTime(
-      Math.max(0.0002, opts.peakGain),
-      opts.when + opts.attack,
-    );
-    g.gain.exponentialRampToValueAtTime(
-      0.0001,
-      opts.when + opts.duration + opts.release,
-    );
-
-    src.connect(filter);
-    filter.connect(g);
-    g.connect(opts.dest);
-    src.start(opts.when);
-    src.stop(opts.when + opts.duration + opts.release + 0.05);
   }
 
   playShot() {
@@ -471,6 +502,7 @@ export class SoundEngine {
     try {
       this.thrusterNoise?.stop();
       this.thrusterOsc?.stop();
+      this.breathNoise?.stop();
       void this.ctx?.close();
     } catch {
       /* ignore */

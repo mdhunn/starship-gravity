@@ -92,6 +92,7 @@ function fieldAt(
 
 /**
  * Gravity-warped grid with Lorentz length contraction along the ship's velocity.
+ * Grid is recentered on the ship every frame so wrap-seam rocks stay on the lattice.
  */
 export function GravityGrid({ sim }: { sim: Simulation }) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -106,6 +107,7 @@ export function GravityGrid({ sim }: { sim: Simulation }) {
     );
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
+    // Local offsets around origin (ship-centered each frame)
     const baseArr = new Float32Array(pos.array.length);
     baseArr.set(pos.array as Float32Array);
     const colors = new Float32Array(pos.count * 3);
@@ -128,30 +130,30 @@ export function GravityGrid({ sim }: { sim: Simulation }) {
     const rel = sim.getRelativity();
     const gamma = rel.gamma;
     const speed = rel.speed;
-    // Length contraction along velocity in the ship frame
     let vxn = 0;
     let vzn = 0;
     if (speed > 0.5) {
       vxn = rel.vx / speed;
       vzn = rel.vz / speed;
     }
-    const contract =
-      1 - (1 - 1 / gamma) * RELATIVITY.gridContract;
+    const contract = 1 - (1 - 1 / gamma) * RELATIVITY.gridContract;
 
     let peak = 0;
     for (let i = 0; i < pos.count; i++) {
       const i3 = i * 3;
-      let bx = base[i3]!;
+      // Ship-centered local offsets from the rest pose
+      const ox = base[i3]!;
       const by = base[i3 + 1]!;
-      let bz = base[i3 + 2]!;
+      const oz = base[i3 + 2]!;
 
-      // Lorentz-contract world relative to ship along v
+      let bx = rel.x + ox;
+      let bz = rel.z + oz;
+
+      // Lorentz-contract relative to ship along velocity
       if (speed > 0.5) {
-        const rx = wrapDelta(bx, rel.x);
-        const rz = wrapDelta(bz, rel.z);
-        const along = rx * vxn + rz * vzn;
-        const px = rx - along * vxn;
-        const pz = rz - along * vzn;
+        const along = ox * vxn + oz * vzn;
+        const px = ox - along * vxn;
+        const pz = oz - along * vzn;
         const alongC = along * contract;
         bx = rel.x + px + alongC * vxn;
         bz = rel.z + pz + alongC * vzn;
@@ -171,11 +173,9 @@ export function GravityGrid({ sim }: { sim: Simulation }) {
 
       const sign = gMul < 0 ? -1 : 1;
       let dy = -mag * VERT_GAIN * sign;
-      // Extra vertical stretch from γ (relativistic field pile-up)
       dy *= 1 + (gamma - 1) * 0.35;
       if (Math.abs(dy) > MAX_VERT * (1 + (gamma - 1) * 0.25)) {
-        dy =
-          Math.sign(dy) * MAX_VERT * (1 + (gamma - 1) * 0.25);
+        dy = Math.sign(dy) * MAX_VERT * (1 + (gamma - 1) * 0.25);
       }
 
       arr[i3] = bx + dx;
@@ -183,7 +183,6 @@ export function GravityGrid({ sim }: { sim: Simulation }) {
       arr[i3 + 2] = bz + dz;
 
       const t = Math.min(1, mag / 12);
-      // Doppler: blueshift ahead of velocity, redshift behind
       let doppler = 0;
       if (speed > 1) {
         const rx = wrapDelta(bx, rel.x);
@@ -204,6 +203,7 @@ export function GravityGrid({ sim }: { sim: Simulation }) {
 
     pos.needsUpdate = true;
     col.needsUpdate = true;
+    geometry.computeBoundingSphere();
 
     if (matRef.current) {
       matRef.current.opacity =

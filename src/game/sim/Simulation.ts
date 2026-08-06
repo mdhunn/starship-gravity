@@ -608,7 +608,7 @@ export class Simulation {
     if (this.blastDamageCd > 0) this.blastDamageCd -= dt;
     this.updateTouchVisibility();
     this.sound.update(dt, {
-      playing: this.mode === "playing" && this.ship.alive,
+      playing: (this.mode === "playing" || this.mode === "demo") && this.ship.alive,
       thrust: this.thrusting,
       reverse: this.reversing,
       level: this.level,

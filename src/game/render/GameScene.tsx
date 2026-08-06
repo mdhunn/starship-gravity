@@ -9,7 +9,8 @@ import { AsteroidMeshes } from "./AsteroidMeshes";
 import { ClaudeMeshes } from "./ClaudeMesh";
 import { Bullets, Particles, PlayfieldRing } from "./BulletsAndFX";
 import { GravityGrid } from "./GravityGrid";
-import { MAX_FRAME_DT, RELATIVITY } from "../constants";
+import { MAX_FRAME_DT, RELATIVITY, WORLD_HALF } from "../constants";
+import { wrapDelta } from "../sim/math";
 
 /** Chase-cam elevation above the playfield (degrees). */
 const CAMERA_ELEVATION_DEG = 35;
@@ -20,6 +21,7 @@ function CameraRig({ sim }: { sim: Simulation }) {
   const { camera } = useThree();
   const target = useRef(new THREE.Vector3());
   const desired = useRef(new THREE.Vector3());
+  const prevShip = useRef<{ x: number; z: number } | null>(null);
   const baseFov = 42;
 
   useFrame((_, dt) => {
@@ -29,6 +31,25 @@ function CameraRig({ sim }: { sim: Simulation }) {
     const sx = (Math.random() - 0.5) * shake * 0.6;
     const sz = (Math.random() - 0.5) * shake * 0.6;
     const rel = sim.getRelativity();
+
+    // When the ship crosses the toroidal seam, sim coords jump by ±WORLD_SIZE.
+    // Rocks already re-home relative to the ship; the chase cam must snap by the
+    // same discontinuity or it lerps across empty space and rocks vanish.
+    if (prevShip.current) {
+      const jumpX =
+        ship.x - prevShip.current.x - wrapDelta(ship.x, prevShip.current.x);
+      const jumpZ =
+        ship.z - prevShip.current.z - wrapDelta(ship.z, prevShip.current.z);
+      if (jumpX !== 0 || jumpZ !== 0) {
+        camera.position.x += jumpX;
+        camera.position.z += jumpZ;
+        desired.current.x += jumpX;
+        desired.current.z += jumpZ;
+        target.current.x += jumpX;
+        target.current.z += jumpZ;
+      }
+    }
+    prevShip.current = { x: ship.x, z: ship.z };
 
     // 35° elevation chase: behind the ship along yaw, looking down at the hull
     const elev = (CAMERA_ELEVATION_DEG * Math.PI) / 180;
@@ -54,6 +75,10 @@ function CameraRig({ sim }: { sim: Simulation }) {
       );
       const want = baseFov + boost;
       cam.fov += (want - cam.fov) * (1 - Math.exp(-6 * d));
+      // Far plane covers a full wrap so seam rocks stay in frustum
+      if (cam.far < WORLD_HALF * 3) {
+        cam.far = WORLD_HALF * 3;
+      }
       cam.updateProjectionMatrix();
     }
   });
@@ -118,12 +143,11 @@ function DistortionTint({
 }) {
   const { scene } = useThree();
   useEffect(() => {
-    // Doppler-tinted fog: blue when fast (beaming), warm under Claude
-    const base = active ? 0.008 + intensity * 0.005 : 0.0042;
-    const fogDensity = base + beta * 0.0035;
+    // Lighter fog so wrap-seam rocks at ~WORLD_HALF aren't swallowed
+    const base = active ? 0.0055 + intensity * 0.004 : 0.0028;
+    const fogDensity = base + beta * 0.0025;
     let color = active ? "#120e0a" : "#05060a";
     if (beta > 0.35) {
-      // Blueshift cast at high speed
       color = active ? "#0a1020" : "#060a14";
     }
     scene.fog = new THREE.FogExp2(color, fogDensity);
@@ -161,7 +185,7 @@ function SceneContents({ sim, onUi }: { sim: Simulation; onUi: () => void }) {
       <Starfield count={1400} />
       <Nebula />
       <GravityGrid sim={sim} />
-      <PlayfieldRing />
+      <PlayfieldRing ship={sim.ship} />
       <CameraRig sim={sim} />
       <SimDriver sim={sim} onUi={onUi} />
     </>
@@ -191,7 +215,7 @@ export function GameCanvas({
           alpha: false,
           powerPreference: "high-performance",
         }}
-        camera={{ fov: 42, near: 0.5, far: 500, position: INIT_CAM }}
+        camera={{ fov: 42, near: 0.5, far: WORLD_HALF * 3, position: INIT_CAM }}
         onCreated={({ gl }) => {
           gl.setClearColor("#05060a");
           gl.toneMapping = THREE.ACESFilmicToneMapping;

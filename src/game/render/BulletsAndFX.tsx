@@ -16,7 +16,7 @@ function BulletMesh({ b, ship }: { b: BulletState; ship: ShipState }) {
     );
   });
   return (
-    <mesh ref={mesh}>
+    <mesh ref={mesh} frustumCulled={false}>
       <sphereGeometry args={[b.radius * 1.3, 8, 8]} />
       <meshBasicMaterial color="#bae6fd" transparent opacity={0.95} />
     </mesh>
@@ -54,7 +54,7 @@ function ParticleMesh({ p, ship }: { p: Particle; ship: ShipState }) {
     mat.opacity = alpha * 0.85;
   });
   return (
-    <mesh ref={mesh}>
+    <mesh ref={mesh} frustumCulled={false}>
       <sphereGeometry args={[1, 6, 6]} />
       <meshBasicMaterial
         color={p.color}
@@ -82,17 +82,25 @@ export function Particles({
   );
 }
 
-/** Boundary ring tracks WORLD_HALF so the arena edge stays readable. */
-export function PlayfieldRing() {
+/**
+ * Soft arena edge — follows the ship so the wrap boundary stays readable
+ * instead of vanishing when you fly away from world origin.
+ */
+export function PlayfieldRing({ ship }: { ship: ShipState }) {
+  const mesh = useRef<THREE.Mesh>(null);
   const outer = WORLD_HALF;
   const inner = WORLD_HALF - 0.9;
+  useFrame(() => {
+    if (!mesh.current) return;
+    mesh.current.position.set(ship.x, -0.5, ship.z);
+  });
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]}>
+    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
       <ringGeometry args={[inner, outer, 96]} />
       <meshBasicMaterial
         color="#1e293b"
         transparent
-        opacity={0.28}
+        opacity={0.22}
         side={2}
       />
     </mesh>

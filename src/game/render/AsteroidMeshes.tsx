@@ -27,7 +27,6 @@ function deformGeometry(radius: number, seed: number): THREE.BufferGeometry {
  * Size tiers stay distinct without sinking into the blue-purple background.
  */
 function rockPalette(size: AsteroidState["size"], seed: number) {
-  // Slight hue jitter per rock so the field doesn't look flat
   const j = ((seed * 0.17) % 1) * 0.06;
   if (size === "large") {
     return {
@@ -69,7 +68,6 @@ function AsteroidMesh({ a, ship }: { a: AsteroidState; ship: ShipState }) {
 
   useFrame(() => {
     if (!group.current) return;
-    // Live ship coords — nearest toroidal image so wrap-seam rocks stay on screen
     group.current.position.set(
       wrapRelative(a.x, ship.x),
       0,
@@ -79,9 +77,8 @@ function AsteroidMesh({ a, ship }: { a: AsteroidState; ship: ShipState }) {
   });
 
   return (
-    <group ref={group}>
-      {/* Core rock — bright warm albedo */}
-      <mesh geometry={geo} castShadow>
+    <group ref={group} frustumCulled={false}>
+      <mesh geometry={geo} castShadow frustumCulled={false}>
         <meshStandardMaterial
           color={palette.color}
           roughness={palette.roughness}
@@ -91,8 +88,7 @@ function AsteroidMesh({ a, ship }: { a: AsteroidState; ship: ShipState }) {
           emissiveIntensity={palette.emissiveIntensity}
         />
       </mesh>
-      {/* Soft rim shell — lifts silhouette off the dark field */}
-      <mesh geometry={geo} scale={1.045}>
+      <mesh geometry={geo} scale={1.045} frustumCulled={false}>
         <meshBasicMaterial
           color="#f0e6d4"
           transparent
