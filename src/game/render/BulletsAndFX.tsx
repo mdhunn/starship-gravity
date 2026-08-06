@@ -82,25 +82,21 @@ export function Particles({
   );
 }
 
-/**
- * Soft arena edge — follows the ship so the wrap boundary stays readable
- * instead of vanishing when you fly away from world origin.
- */
-export function PlayfieldRing({ ship }: { ship: ShipState }) {
-  const mesh = useRef<THREE.Mesh>(null);
+/** World-fixed arena ring — stays put so thrusters clearly change your place. */
+export function PlayfieldRing() {
   const outer = WORLD_HALF;
   const inner = WORLD_HALF - 0.9;
-  useFrame(() => {
-    if (!mesh.current) return;
-    mesh.current.position.set(ship.x, -0.5, ship.z);
-  });
   return (
-    <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -0.5, 0]}
+      frustumCulled={false}
+    >
       <ringGeometry args={[inner, outer, 96]} />
       <meshBasicMaterial
         color="#1e293b"
         transparent
-        opacity={0.22}
+        opacity={0.28}
         side={2}
       />
     </mesh>

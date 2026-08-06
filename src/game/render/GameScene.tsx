@@ -14,7 +14,7 @@ import { wrapDelta } from "../sim/math";
 
 /** Chase-cam elevation above the playfield (degrees). */
 const CAMERA_ELEVATION_DEG = 35;
-/** Distance from ship to camera (world units) — keeps framing similar to the old ~59 unit slant range. */
+/** Distance from ship to camera (world units). */
 const CAMERA_DISTANCE = 60;
 
 function CameraRig({ sim }: { sim: Simulation }) {
@@ -32,9 +32,8 @@ function CameraRig({ sim }: { sim: Simulation }) {
     const sz = (Math.random() - 0.5) * shake * 0.6;
     const rel = sim.getRelativity();
 
-    // When the ship crosses the toroidal seam, sim coords jump by ±WORLD_SIZE.
-    // Rocks already re-home relative to the ship; the chase cam must snap by the
-    // same discontinuity or it lerps across empty space and rocks vanish.
+    // Snap cam across toroidal seams so it doesn't lerp through empty space
+    // while rocks re-home relative to the ship.
     if (prevShip.current) {
       const jumpX =
         ship.x - prevShip.current.x - wrapDelta(ship.x, prevShip.current.x);
@@ -51,9 +50,7 @@ function CameraRig({ sim }: { sim: Simulation }) {
     }
     prevShip.current = { x: ship.x, z: ship.z };
 
-    // 35° elevation chase: behind the ship along yaw, looking down at the hull
     const elev = (CAMERA_ELEVATION_DEG * Math.PI) / 180;
-    // Mild length contraction of camera boom along velocity at high γ
     const boomScale = 1 - (1 - 1 / rel.gamma) * 0.35;
     const height = CAMERA_DISTANCE * Math.sin(elev) * boomScale;
     const back = CAMERA_DISTANCE * Math.cos(elev) * boomScale;
@@ -66,7 +63,6 @@ function CameraRig({ sim }: { sim: Simulation }) {
     target.current.set(ship.x, 0, ship.z);
     camera.lookAt(target.current);
 
-    // Relativistic beaming / aberration: FOV opens with γ
     const cam = camera as THREE.PerspectiveCamera;
     if (cam.isPerspectiveCamera) {
       const boost = Math.min(
@@ -75,10 +71,7 @@ function CameraRig({ sim }: { sim: Simulation }) {
       );
       const want = baseFov + boost;
       cam.fov += (want - cam.fov) * (1 - Math.exp(-6 * d));
-      // Far plane covers a full wrap so seam rocks stay in frustum
-      if (cam.far < WORLD_HALF * 3) {
-        cam.far = WORLD_HALF * 3;
-      }
+      if (cam.far < WORLD_HALF * 3) cam.far = WORLD_HALF * 3;
       cam.updateProjectionMatrix();
     }
   });
@@ -115,7 +108,6 @@ function SimDriver({ sim, onUi }: { sim: Simulation; onUi: () => void }) {
 function Lights({ intensityBoost }: { intensityBoost: number }) {
   return (
     <>
-      {/* Cool ambient keeps space dark; key light is warm so rocks pop */}
       <ambientLight intensity={0.28 + intensityBoost * 0.05} color="#6b7a99" />
       <directionalLight
         position={[25, 50, 15]}
@@ -143,7 +135,6 @@ function DistortionTint({
 }) {
   const { scene } = useThree();
   useEffect(() => {
-    // Lighter fog so wrap-seam rocks at ~WORLD_HALF aren't swallowed
     const base = active ? 0.0055 + intensity * 0.004 : 0.0028;
     const fogDensity = base + beta * 0.0025;
     let color = active ? "#120e0a" : "#05060a";
@@ -185,7 +176,7 @@ function SceneContents({ sim, onUi }: { sim: Simulation; onUi: () => void }) {
       <Starfield count={1400} />
       <Nebula />
       <GravityGrid sim={sim} />
-      <PlayfieldRing ship={sim.ship} />
+      <PlayfieldRing />
       <CameraRig sim={sim} />
       <SimDriver sim={sim} onUi={onUi} />
     </>
