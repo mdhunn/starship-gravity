@@ -18,6 +18,18 @@ export function wrapDelta(a: number, b: number, half = WORLD_HALF): number {
   return d;
 }
 
+/**
+ * Nearest toroidal image of `coord` relative to `origin`.
+ * Use for rendering so wrap-around neighbors stay on-screen near the ship.
+ */
+export function wrapRelative(
+  coord: number,
+  origin: number,
+  half = WORLD_HALF,
+): number {
+  return origin + wrapDelta(coord, origin, half);
+}
+
 export function len2(x: number, z: number): number {
   return Math.hypot(x, z);
 }

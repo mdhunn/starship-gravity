@@ -1,10 +1,17 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { ClaudeState } from "../types";
+import type { ClaudeState, ShipState } from "../types";
 import { CLAUDE } from "../constants";
+import { wrapDelta, wrapRelative } from "../sim/math";
 
-function ClaudeOne({ c, shipNear }: { c: ClaudeState; shipNear: boolean }) {
+function ClaudeOne({
+  c,
+  ship,
+}: {
+  c: ClaudeState;
+  ship: ShipState;
+}) {
   const group = useRef<THREE.Group>(null);
   const ring = useRef<THREE.Mesh>(null);
   const aura = useRef<THREE.Mesh>(null);
@@ -12,8 +19,16 @@ function ClaudeOne({ c, shipNear }: { c: ClaudeState; shipNear: boolean }) {
   useFrame((state) => {
     if (!group.current) return;
     const t = state.clock.elapsedTime;
-    group.current.position.set(c.x, 1.2 + Math.sin(t * 2 + c.phase) * 0.35, c.z);
+    group.current.position.set(
+      wrapRelative(c.x, ship.x),
+      1.2 + Math.sin(t * 2 + c.phase) * 0.35,
+      wrapRelative(c.z, ship.z),
+    );
     group.current.rotation.y = t * 0.6 + c.phase;
+
+    const shipNear =
+      Math.hypot(wrapDelta(c.x, ship.x), wrapDelta(c.z, ship.z)) <
+      CLAUDE.influenceRadius;
 
     if (ring.current) {
       ring.current.rotation.x = t * 1.2;
@@ -79,21 +94,16 @@ function ClaudeOne({ c, shipNear }: { c: ClaudeState; shipNear: boolean }) {
 
 export function ClaudeMeshes({
   claudes,
-  shipX,
-  shipZ,
+  ship,
 }: {
   claudes: ClaudeState[];
-  shipX: number;
-  shipZ: number;
+  ship: ShipState;
 }) {
   return (
     <group>
-      {claudes.map((c) => {
-        const d = Math.hypot(c.x - shipX, c.z - shipZ);
-        return (
-          <ClaudeOne key={c.id} c={c} shipNear={d < CLAUDE.influenceRadius} />
-        );
-      })}
+      {claudes.map((c) => (
+        <ClaudeOne key={c.id} c={c} ship={ship} />
+      ))}
     </group>
   );
 }

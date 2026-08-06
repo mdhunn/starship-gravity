@@ -1,7 +1,8 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { AsteroidState } from "../types";
+import type { AsteroidState, ShipState } from "../types";
+import { wrapRelative } from "../sim/math";
 
 function deformGeometry(radius: number, seed: number): THREE.BufferGeometry {
   const geo = new THREE.IcosahedronGeometry(radius, 2);
@@ -55,7 +56,7 @@ function rockPalette(size: AsteroidState["size"], seed: number) {
   };
 }
 
-function AsteroidMesh({ a }: { a: AsteroidState }) {
+function AsteroidMesh({ a, ship }: { a: AsteroidState; ship: ShipState }) {
   const group = useRef<THREE.Group>(null);
   const geo = useMemo(
     () => deformGeometry(a.radius, a.seed),
@@ -68,7 +69,12 @@ function AsteroidMesh({ a }: { a: AsteroidState }) {
 
   useFrame(() => {
     if (!group.current) return;
-    group.current.position.set(a.x, 0, a.z);
+    // Live ship coords — nearest toroidal image so wrap-seam rocks stay on screen
+    group.current.position.set(
+      wrapRelative(a.x, ship.x),
+      0,
+      wrapRelative(a.z, ship.z),
+    );
     group.current.rotation.set(a.rotX, a.rotY, a.rotZ);
   });
 
@@ -99,11 +105,17 @@ function AsteroidMesh({ a }: { a: AsteroidState }) {
   );
 }
 
-export function AsteroidMeshes({ asteroids }: { asteroids: AsteroidState[] }) {
+export function AsteroidMeshes({
+  asteroids,
+  ship,
+}: {
+  asteroids: AsteroidState[];
+  ship: ShipState;
+}) {
   return (
     <group>
       {asteroids.map((a) => (
-        <AsteroidMesh key={a.id} a={a} />
+        <AsteroidMesh key={a.id} a={a} ship={ship} />
       ))}
     </group>
   );

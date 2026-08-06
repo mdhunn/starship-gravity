@@ -1,40 +1,83 @@
+import { useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
 import { WORLD_HALF } from "../constants";
-import type { BulletState, Particle } from "../types";
+import type { BulletState, Particle, ShipState } from "../types";
+import { wrapRelative } from "../sim/math";
 
-export function Bullets({ bullets }: { bullets: BulletState[] }) {
+function BulletMesh({ b, ship }: { b: BulletState; ship: ShipState }) {
+  const mesh = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    if (!mesh.current) return;
+    mesh.current.position.set(
+      wrapRelative(b.x, ship.x),
+      0.35,
+      wrapRelative(b.z, ship.z),
+    );
+  });
+  return (
+    <mesh ref={mesh}>
+      <sphereGeometry args={[b.radius * 1.3, 8, 8]} />
+      <meshBasicMaterial color="#bae6fd" transparent opacity={0.95} />
+    </mesh>
+  );
+}
+
+export function Bullets({
+  bullets,
+  ship,
+}: {
+  bullets: BulletState[];
+  ship: ShipState;
+}) {
   return (
     <group>
       {bullets.map((b) => (
-        <mesh key={b.id} position={[b.x, 0.35, b.z]}>
-          <sphereGeometry args={[b.radius * 1.3, 8, 8]} />
-          <meshBasicMaterial color="#bae6fd" transparent opacity={0.95} />
-        </mesh>
+        <BulletMesh key={b.id} b={b} ship={ship} />
       ))}
     </group>
   );
 }
 
-export function Particles({ particles }: { particles: Particle[] }) {
+function ParticleMesh({ p, ship }: { p: Particle; ship: ShipState }) {
+  const mesh = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    if (!mesh.current) return;
+    const alpha = Math.max(0, p.life / p.maxLife);
+    mesh.current.position.set(
+      wrapRelative(p.x, ship.x),
+      Math.max(0, p.y),
+      wrapRelative(p.z, ship.z),
+    );
+    mesh.current.scale.setScalar(p.size * (0.5 + alpha));
+    const mat = mesh.current.material as THREE.MeshBasicMaterial;
+    mat.opacity = alpha * 0.85;
+  });
+  return (
+    <mesh ref={mesh}>
+      <sphereGeometry args={[1, 6, 6]} />
+      <meshBasicMaterial
+        color={p.color}
+        transparent
+        opacity={0.85}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+export function Particles({
+  particles,
+  ship,
+}: {
+  particles: Particle[];
+  ship: ShipState;
+}) {
   return (
     <group>
-      {particles.map((p) => {
-        const alpha = Math.max(0, p.life / p.maxLife);
-        return (
-          <mesh
-            key={p.id}
-            position={[p.x, Math.max(0, p.y), p.z]}
-            scale={p.size * (0.5 + alpha)}
-          >
-            <sphereGeometry args={[1, 6, 6]} />
-            <meshBasicMaterial
-              color={p.color}
-              transparent
-              opacity={alpha * 0.85}
-              depthWrite={false}
-            />
-          </mesh>
-        );
-      })}
+      {particles.map((p) => (
+        <ParticleMesh key={p.id} p={p} ship={ship} />
+      ))}
     </group>
   );
 }

@@ -79,14 +79,10 @@ function SimDriver({ sim, onUi }: { sim: Simulation; onUi: () => void }) {
   return (
     <>
       <ShipMesh ship={sim.ship} getThrusting={getThrusting} />
-      <AsteroidMeshes asteroids={sim.asteroids} />
-      <ClaudeMeshes
-        claudes={sim.claudes}
-        shipX={sim.ship.x}
-        shipZ={sim.ship.z}
-      />
-      <Bullets bullets={sim.bullets} />
-      <Particles particles={sim.particles.slice(0, 80)} />
+      <AsteroidMeshes asteroids={sim.asteroids} ship={sim.ship} />
+      <ClaudeMeshes claudes={sim.claudes} ship={sim.ship} />
+      <Bullets bullets={sim.bullets} ship={sim.ship} />
+      <Particles particles={sim.particles.slice(0, 80)} ship={sim.ship} />
     </>
   );
 }

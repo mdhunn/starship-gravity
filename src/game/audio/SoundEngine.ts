@@ -119,6 +119,13 @@ export class SoundEngine {
     if (this.fxBus) {
       this.fxBus.gain.setTargetAtTime(1, t, 0.04);
     }
+    if (this.breathGain) {
+      const open =
+        this.breathActive &&
+        this.settings.breathEnabled &&
+        this.settings.breathVolume > 0.001;
+      this.breathGain.gain.setTargetAtTime(open ? 1 : 0, t, 0.06);
+    }
   }
 
   unlock() {
@@ -153,8 +160,9 @@ export class SoundEngine {
     this.fxBus.gain.value = 1;
     this.fxBus.connect(this.master);
 
+    // Start open — mute is driven by breathActive / settings in update()
     this.breathGain = this.ctx.createGain();
-    this.breathGain.gain.value = 0;
+    this.breathGain.gain.value = 1;
     this.breathGain.connect(this.master);
 
     this.noiseBuffer = this.makeNoiseBuffer(2);
@@ -218,7 +226,11 @@ export class SoundEngine {
     if (!this.unlocked) return;
     this.ensure();
     if (!this.ctx || !this.started) return;
-    if (this.ctx.state === "suspended") return;
+    if (this.ctx.state === "suspended") {
+      // Keep trying to resume after user gesture / tab focus
+      void this.ctx.resume();
+      return;
+    }
 
     const engine = Math.max(opts.thrust, opts.reverse * 0.75);
     const thrusterOn =
@@ -246,10 +258,17 @@ export class SoundEngine {
       baseInterval * (1 - this.breathStress * 0.42),
     );
 
+    if (this.breathGain) {
+      // Bus was previously stuck at 0 — breaths never made it to the speakers
+      this.breathGain.gain.setTargetAtTime(
+        this.breathActive ? 1 : 0,
+        this.ctx.currentTime,
+        0.08,
+      );
+    }
+
     if (this.breathActive) {
       this.scheduleBreaths();
-    } else if (this.breathGain) {
-      this.breathGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08);
     }
   }
 
@@ -278,6 +297,7 @@ export class SoundEngine {
     const now = this.ctx.currentTime;
     if (this.breathNextAt < now) this.breathNextAt = now + 0.05;
 
+    // Schedule a short horizon so inhalations stay continuous without backlog
     while (this.breathNextAt < now + 1.2) {
       this.playOneBreath(this.breathNextAt);
       this.breathNextAt += this.breathInterval;
@@ -290,8 +310,8 @@ export class SoundEngine {
     const stress = this.breathStress;
     const inhaleDur = 0.45 + stress * 0.12;
     const exhaleDur = 0.55 + stress * 0.15;
-    const peak =
-      (0.07 + stress * 0.08) * this.settings.breathVolume;
+    // Louder helmet mic so breathing is audible under thrusters
+    const peak = (0.14 + stress * 0.12) * this.settings.breathVolume;
 
     this.noiseBurst({
       when,
